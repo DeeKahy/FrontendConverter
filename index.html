@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Forge — Frontend File Converter</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23111'/><path d='M8 22 L16 8 L24 22 Z' fill='none' stroke='%23ffb347' stroke-width='2.5' stroke-linejoin='round'/></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#1a1a1d"/>
+        <path d="M8 22 L16 8 L24 22 Z" fill="none" stroke="#ffb347" stroke-width="2.5" stroke-linejoin="round"/>
+      </svg>
+      <h1>Forge</h1>
+      <span class="tag">frontend-only file converter</span>
+    </div>
+    <nav>
+      <a href="#supported" class="muted">Supported formats</a>
+      <a href="./README.md" class="muted">Add a format</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h2>Drop a file. Pick a target. Convert in your browser.</h2>
+      <p class="muted">Nothing leaves your machine. Heavy tools (like FFmpeg) only load on demand.</p>
+    </section>
+
+    <section id="drop" class="dropzone" tabindex="0" aria-label="Drop files to convert">
+      <input type="file" id="file-input" multiple hidden />
+      <div class="drop-inner">
+        <svg viewBox="0 0 48 48" width="52" height="52" aria-hidden="true">
+          <path d="M24 30 V10 M16 18 L24 10 L32 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 32 V38 A2 2 0 0 0 10 40 H38 A2 2 0 0 0 40 38 V32" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <p><strong>Drop files</strong> or <button id="browse" class="linkish">browse</button></p>
+        <p class="muted small">Any format. The app figures out what conversions are available.</p>
+      </div>
+    </section>
+
+    <section id="queue" class="queue" hidden>
+      <div class="queue-header">
+        <h3>Queue</h3>
+        <div>
+          <button id="convert-all" class="primary">Convert all</button>
+          <button id="clear-all" class="ghost">Clear</button>
+        </div>
+      </div>
+      <ul id="queue-list"></ul>
+    </section>
+
+    <section id="supported" class="supported">
+      <h3>Supported conversions</h3>
+      <p class="muted small">Each row below is a registered converter. Add or remove them by editing <code>src/converters/</code>.</p>
+      <div id="support-grid" class="support-grid"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span class="muted small">
+      Runs entirely in your browser · No uploads · <a class="muted" href="./README.md">How to add a format</a>
+    </span>
+  </footer>
+
+  <template id="queue-item-tpl">
+    <li class="qitem">
+      <div class="qinfo">
+        <div class="qname"></div>
+        <div class="qmeta muted small"></div>
+      </div>
+      <div class="qcontrols">
+        <label class="sr-only">Target format</label>
+        <select class="qtarget"></select>
+        <button class="qconvert primary small">Convert</button>
+        <button class="qremove ghost small" aria-label="Remove">×</button>
+      </div>
+      <div class="qstatus muted small"></div>
+      <div class="qresult" hidden></div>
+    </li>
+  </template>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
