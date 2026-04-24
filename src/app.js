@@ -142,21 +142,51 @@ async function runOne(id) {
   renderProgress(status, 0, conv.heavy ? 'Preparing heavy dependency…' : 'Converting…');
 
   try {
-    const blob = await conv.convert(file, toExt, {
+    const raw = await conv.convert(file, toExt, {
       onProgress(p, msg) { renderProgress(status, p, msg); }
     });
 
-    const outName = swapExt(file.name, toExt);
-    const url = URL.createObjectURL(blob);
+    // Normalize: converter may return a single Blob or [{blob,name}, ...].
+    const outputs = Array.isArray(raw)
+      ? raw
+      : [{ blob: raw, name: swapExt(file.name, toExt) }];
+
+    const totalSize = outputs.reduce((n, o) => n + o.blob.size, 0);
 
     status.className = 'qstatus ok';
-    status.textContent = `Done · ${humanSize(blob.size)} · via ${conv.name}`;
+    status.textContent = outputs.length === 1
+      ? `Done · ${humanSize(totalSize)} · via ${conv.name}`
+      : `Done · ${outputs.length} files · ${humanSize(totalSize)} · via ${conv.name}`;
+
     result.hidden = false;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = outName;
-    a.textContent = `Download ${outName}`;
-    result.appendChild(a);
+
+    // One link per output.
+    const links = [];
+    for (const { blob, name } of outputs) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.textContent = `Download ${name}`;
+      result.appendChild(a);
+      links.push(a);
+    }
+
+    // "Download all" for multi-output conversions — clicks each link with a
+    // small delay so browsers actually save them all instead of collapsing
+    // the requests.
+    if (outputs.length > 1) {
+      const allBtn = document.createElement('button');
+      allBtn.className = 'primary small';
+      allBtn.textContent = `Download all (${outputs.length})`;
+      allBtn.addEventListener('click', async () => {
+        for (const a of links) {
+          a.click();
+          await new Promise(r => setTimeout(r, 120));
+        }
+      });
+      result.prepend(allBtn);
+    }
   } catch (err) {
     console.error(err);
     status.className = 'qstatus error';

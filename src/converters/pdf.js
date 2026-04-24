@@ -74,41 +74,63 @@ registerConverter({
 
 registerConverter({
   id: 'pdf-image',
-  name: 'PDF → PNG (page 1)',
+  name: 'PDF → image (all pages)',
   from: ['pdf'],
   to: ['png', 'jpg', 'jpeg', 'webp'],
   heavy: false,
-  notes: 'Renders page 1 at 2× scale via pdf.js. Extend to multi-page by looping pdf.numPages.',
+  notes: 'Renders every page at 2× scale via pdf.js. Multi-page PDFs produce one image per page with -p1/-p2/… suffixes.',
   async convert(file, targetExt, { onProgress } = {}) {
-    onProgress?.(0.05);
+    onProgress?.(0.02, 'Loading PDF engine…');
     const pdfjs = await loadPdfJs();
-    onProgress?.(0.3);
 
     const data = new Uint8Array(await file.arrayBuffer());
     const pdf = await pdfjs.getDocument({ data }).promise;
-    const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 2 });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
-    const ctx = canvas.getContext('2d');
-
-    if (targetExt === 'jpg' || targetExt === 'jpeg') {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    onProgress?.(0.85);
+    const pageCount = pdf.numPages;
+    onProgress?.(0.1, `Rendering ${pageCount} page${pageCount === 1 ? '' : 's'}…`);
 
     const mime = targetExt === 'png' ? 'image/png'
                : targetExt === 'webp' ? 'image/webp'
                : 'image/jpeg';
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime, 0.95);
-    });
+
+    const baseName = file.name.replace(/\.[^./\\]+$/, '');
+    const pad = String(pageCount).length;
+    const outputs = [];
+
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (targetExt === 'jpg' || targetExt === 'jpeg') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime, 0.95);
+      });
+
+      // Single-page PDF → plain name (no suffix). Multi-page → zero-padded
+      // -p01/-p02/… so files sort naturally in the user's file manager.
+      const name = pageCount === 1
+        ? `${baseName}.${targetExt}`
+        : `${baseName}-p${String(i).padStart(pad, '0')}.${targetExt}`;
+
+      outputs.push({ blob, name });
+      onProgress?.(0.1 + 0.88 * (i / pageCount), `Rendered page ${i} of ${pageCount}`);
+
+      // Free the page's resources so big PDFs don't blow up memory.
+      page.cleanup();
+    }
+
     onProgress?.(1);
-    return blob;
+    // Single-page → return a plain Blob (keeps the contract simple).
+    return outputs.length === 1 ? outputs[0].blob : outputs;
   }
 });

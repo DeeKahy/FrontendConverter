@@ -28,7 +28,7 @@ Then open http://localhost:5173.
 | CSV ↔ JSON | csv ↔ json | pure JS |
 | Text ↔ Markdown | txt ↔ md | pure JS |
 | Image → PDF | png/jpg/webp → pdf | [jsPDF](https://github.com/parallax/jsPDF) (CDN, lazy) |
-| PDF → image (p. 1) | pdf → png/jpg/webp | [pdf.js](https://mozilla.github.io/pdf.js/) (CDN, lazy) |
+| PDF → image (all pages) | pdf → png/jpg/webp | [pdf.js](https://mozilla.github.io/pdf.js/) (CDN, lazy) |
 | Audio transcode | mp3/wav/ogg/m4a/flac/aac → mp3/wav/ogg | [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) (CDN, **lazy — ~30 MB**) |
 | Video transcode / extract | mp4/mov/webm/mkv/avi → mp4/webm/gif/mp3 | ffmpeg.wasm (CDN, lazy) |
 
@@ -91,6 +91,24 @@ That's it. The UI automatically:
 - offers `.abc` in the target dropdown whenever a `.xyz` file is dropped,
 - shows the converter in the "Supported conversions" grid at the bottom,
 - wires up progress + download links.
+
+### One input, many outputs
+
+If a single conversion produces several files (e.g. one image per PDF page),
+return an array of `{ blob, name }` instead of a single `Blob`:
+
+```js
+async convert(file, targetExt) {
+  return [
+    { blob: pageOneBlob,   name: 'doc-p1.png' },
+    { blob: pageTwoBlob,   name: 'doc-p2.png' },
+    { blob: pageThreeBlob, name: 'doc-p3.png' },
+  ];
+}
+```
+
+The UI renders one download link per output and adds a "Download all"
+button automatically. Single-page cases should still return a plain `Blob`.
 
 ### Lazy-loading a heavy dependency
 

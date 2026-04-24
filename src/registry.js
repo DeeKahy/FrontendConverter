@@ -15,7 +15,12 @@
  * @property {boolean}  [heavy]     True if the converter pulls in a big dependency (e.g. ffmpeg).
  *                                  Heavy converters get a warning badge and load lazily.
  * @property {string}   [notes]     Shown in the supported-formats panel.
- * @property {(file: File, targetExt: string, opts?: {onProgress?: (n:number)=>void}) => Promise<Blob>} convert
+ * @property {(file: File, targetExt: string, opts?: {onProgress?: (n:number, msg?:string)=>void}) => Promise<Blob | Array<{blob:Blob,name:string}>>} convert
+ *   Return either:
+ *     - a single Blob (the app will name it <originalBase>.<targetExt>), or
+ *     - an array of { blob, name } when a single input produces multiple
+ *       outputs (e.g. one image per PDF page). Names must include the
+ *       extension.
  */
 
 /** @type {Converter[]} */
