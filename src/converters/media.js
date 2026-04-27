@@ -3,16 +3,23 @@
 // The heavy lifting is gated behind getFFmpeg() so nothing FFmpeg-related is
 // fetched until the user actually runs a media conversion.
 //
-// If the CDN fails to load, the converter surfaces a clear error instead of
-// silently hanging.
+// IMPORTANT: FFmpeg's worker MUST be loaded same-origin. Browsers refuse to
+// instantiate `new Worker(crossOriginURL)` even when CORS headers are set,
+// which is why we vendor the FFmpeg files into ./vendor/ and import from
+// there. Run `node tools/vendor-ffmpeg.mjs` once if vendor/ is empty.
+//
+// The paths below are computed relative to THIS module so the app works
+// whether it's deployed at https://user.github.io/repo/ or at any sub-path.
 
 import { registerConverter } from '../registry.js';
 
-// Keep these aligned with one another — 0.12.x of @ffmpeg/ffmpeg uses the
-// multi-threaded core by default. umd builds exist but we want ESM.
-const FFMPEG_URL = 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
-const UTIL_URL   = 'https://esm.sh/@ffmpeg/util@0.12.1';
-const CORE_URL   = 'https://esm.sh/@ffmpeg/core@0.12.6/dist/esm';
+// new URL('relative', import.meta.url) gives us an absolute URL that respects
+// whatever sub-path the app is deployed under. From src/converters/media.js,
+// ../../vendor/... reaches the project-root vendor/ directory.
+const FFMPEG_URL = new URL('../../vendor/ffmpeg/index.js',         import.meta.url).href;
+const UTIL_URL   = new URL('../../vendor/util/index.js',           import.meta.url).href;
+const CORE_JS    = new URL('../../vendor/core/ffmpeg-core.js',     import.meta.url).href;
+const CORE_WASM  = new URL('../../vendor/core/ffmpeg-core.wasm',   import.meta.url).href;
 
 let ffmpegInstance;           // cached instance, reused between conversions
 let ffmpegLoading;            // de-dupe concurrent loads
@@ -21,11 +28,21 @@ async function getFFmpeg(onProgress) {
   if (ffmpegInstance) return ffmpegInstance;
   if (ffmpegLoading) return ffmpegLoading;
   ffmpegLoading = (async () => {
-    onProgress?.(0.02, 'Downloading FFmpeg (~30 MB, one-time)…');
-    const [{ FFmpeg }, util] = await Promise.all([
-      import(/* @vite-ignore */ FFMPEG_URL),
-      import(/* @vite-ignore */ UTIL_URL),
-    ]);
+    onProgress?.(0.02, 'Loading FFmpeg…');
+    let mods;
+    try {
+      mods = await Promise.all([
+        import(/* @vite-ignore */ FFMPEG_URL),
+        import(/* @vite-ignore */ UTIL_URL),
+      ]);
+    } catch (e) {
+      throw new Error(
+        'FFmpeg files are missing from ./vendor/. Run ' +
+        '`node tools/vendor-ffmpeg.mjs` to download them. ' +
+        `(Underlying error: ${e.message})`
+      );
+    }
+    const [{ FFmpeg }, util] = mods;
     const ff = new FFmpeg();
     ff.on('progress', ({ progress }) => {
       // FFmpeg reports per-conversion progress in 0..1.
@@ -33,10 +50,15 @@ async function getFFmpeg(onProgress) {
         onProgress?.(0.4 + Math.min(Math.max(progress, 0), 1) * 0.55);
       }
     });
-    onProgress?.(0.1, 'Fetching FFmpeg core…');
+    onProgress?.(0.1, 'Fetching FFmpeg core (~31 MB, one-time)…');
+    // Even though everything is same-origin, we still pass the core/wasm as
+    // blob URLs because ffmpeg.wasm's worker uses dynamic import() for the
+    // core, and a Blob URL sidesteps any caching/MIME quirks of static hosts.
     await ff.load({
-      coreURL:   await util.toBlobURL(`${CORE_URL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL:   await util.toBlobURL(`${CORE_URL}/ffmpeg-core.wasm`, 'application/wasm'),
+      coreURL:   await util.toBlobURL(CORE_JS,   'text/javascript'),
+      wasmURL:   await util.toBlobURL(CORE_WASM, 'application/wasm'),
+      // classWorkerURL deliberately omitted — defaults to ./worker.js next
+      // to classes.js, which is the vendored same-origin file we want.
     });
     onProgress?.(0.38, 'FFmpeg ready');
     ffmpegInstance = ff;

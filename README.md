@@ -18,6 +18,43 @@ npx serve .
 
 Then open http://localhost:5173.
 
+## Deploy (GitHub Pages, Netlify, Cloudflare Pages, S3 — anywhere static)
+
+Just commit the repo and point the host at it. There's no build step.
+
+**One thing you must do before the first deploy if you want FFmpeg-backed
+audio/video conversions to work:** vendor the FFmpeg files into `./vendor/`.
+
+```bash
+node tools/vendor-ffmpeg.mjs
+git add vendor/
+git commit -m "Vendor FFmpeg"
+git push
+```
+
+This downloads `@ffmpeg/ffmpeg`, `@ffmpeg/util`, and `@ffmpeg/core` from
+unpkg into `vendor/`. They're checked into the repo and deployed alongside
+the app.
+
+### Why vendoring is required for FFmpeg
+
+Browsers refuse to instantiate `new Worker(crossOriginURL)` even when the
+target server sets CORS headers. FFmpeg.wasm internally creates a worker
+(`new Worker('./worker.js')`), so loading FFmpeg from a CDN like esm.sh
+fails with:
+
+> Security Error: Content at https://your-page/ may not load data from
+> https://esm.sh/.../worker.js
+
+The fix is to serve FFmpeg's files from the same origin as the page —
+that's what `vendor/` gives you. Image, SVG, PDF, and text conversions
+don't use workers, so they work fine from a CDN.
+
+The `tools/vendor-ffmpeg.mjs` script is a tiny ~80-line Node script that
+just `fetch()`es the dist files from unpkg into `vendor/`. Re-run it
+whenever you want to bump versions (edit the version constants at the
+top of the file).
+
 ## What's built in
 
 | Converter | From → To | Library |
