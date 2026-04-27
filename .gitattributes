@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Vendored WASM is binary — never let git mangle it.
+vendor/ffmpeg/*.wasm binary
+vendor/ffmpeg/*.js   text eol=lf
