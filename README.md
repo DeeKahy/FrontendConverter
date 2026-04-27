@@ -4,9 +4,10 @@ A zero-backend web app that converts files entirely in the browser. No uploads,
 nothing leaves the machine. Heavy tooling (FFmpeg) lazy-loads only when a media
 conversion is actually requested.
 
-## Run it locally
+## Run it
 
-ES modules don't load from `file://`, so use any static server:
+ES modules don't load from `file://` in most browsers, so use any static
+server:
 
 ```bash
 # from this folder
@@ -16,51 +17,6 @@ npx serve .
 ```
 
 Then open http://localhost:5173.
-
-## Deploying to GitHub Pages (or any static host)
-
-GitHub Pages **is** a static server — it serves your HTML/JS just fine, the
-same way `python3 -m http.server` does. You don't need a backend.
-
-But there's one catch: **FFmpeg.wasm files must be served from your own
-origin**, not from a CDN. Two reasons:
-
-1. CDNs that transform JS (`esm.sh`) don't reliably serve raw `.wasm` files —
-   the request can stall on "Fetching FFmpeg core…" forever.
-2. FFmpeg.wasm spawns a Web Worker. Cross-origin Workers want
-   `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` response
-   headers, which **GitHub Pages does not let you set.**
-
-So before deploying, run the vendor script once:
-
-```bash
-./scripts/fetch-vendor.sh        # macOS / Linux
-node scripts/fetch-vendor.mjs    # Windows / cross-platform
-```
-
-That downloads ~30 MB of FFmpeg files into `vendor/ffmpeg/`. Commit them:
-
-```bash
-git add vendor/
-git commit -m "vendor ffmpeg"
-git push
-```
-
-GitHub Pages will then serve the FFmpeg files alongside your app, same-origin,
-and everything works. The `vendor/ffmpeg/MANIFEST.json` records which versions
-are pinned — re-run the script if you bump versions.
-
-> **Tip:** the app loads FFmpeg lazily, so if you don't care about the
-> audio/video converters you can skip vendoring entirely. Only image, SVG,
-> CSV/JSON, and (CDN-loaded) PDF conversions will work in that case.
-
-### Why aren't jsPDF and pdf.js vendored?
-
-They're loaded from `unpkg.com` — a real raw-file CDN that works fine
-cross-origin (no Workers, no SharedArrayBuffer). If you want a fully
-self-contained build with zero CDN calls, mirror the same vendoring pattern:
-download to `vendor/jspdf/` and `vendor/pdfjs/`, update the URLs at the top
-of `src/converters/pdf.js`.
 
 ## What's built in
 

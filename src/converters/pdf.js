@@ -6,22 +6,15 @@
 
 import { registerConverter } from '../registry.js';
 
-// We use unpkg (a raw npm-file CDN) rather than esm.sh.
-// esm.sh is a module *transformer* — fine for cleaned ESM imports, but it's
-// not reliable for raw assets like .wasm or worker scripts. unpkg serves the
-// actual files from the npm registry, which is what we want for pdf.js's
-// worker.
-const JSPDF_URL  = 'https://unpkg.com/jspdf@2.5.2/dist/jspdf.es.min.js';
-const PDFJS_URL  = 'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.mjs';
-const PDFJS_WRKR = 'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.worker.mjs';
+// esm.sh bundles npm packages as ES modules usable directly in the browser.
+// Pinning versions keeps the app reproducible.
+const JSPDF_URL  = 'https://esm.sh/jspdf@2.5.2';
+const PDFJS_URL  = 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.mjs';
+const PDFJS_WRKR = 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.worker.mjs';
 
 let jsPDFPromise;
 function loadJsPDF() {
-  jsPDFPromise ??= import(/* @vite-ignore */ JSPDF_URL).then(m => {
-    // jsPDF's ESM build can expose the constructor at any of these paths
-    // depending on how the bundler emitted it.
-    return m.jsPDF || m.default?.jsPDF || m.default || self.jspdf?.jsPDF;
-  });
+  jsPDFPromise ??= import(/* @vite-ignore */ JSPDF_URL).then(m => m.jsPDF || m.default?.jsPDF || m.default);
   return jsPDFPromise;
 }
 
