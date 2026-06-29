@@ -12,9 +12,21 @@ const JSPDF_URL  = 'https://esm.sh/jspdf@2.5.2';
 const PDFJS_URL  = 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.mjs';
 const PDFJS_WRKR = 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.worker.mjs';
 
+// These libraries load from a CDN on first use. If the network is down or the
+// CDN is blocked, the dynamic import() rejects with an opaque message — wrap it
+// in something actionable (mirrors how media.js reports a missing FFmpeg).
+function cdnError(lib, e) {
+  return new Error(
+    `Couldn't load ${lib} from the CDN — check your connection, or self-host ` +
+    `it by editing the URL in src/converters/pdf.js. (${e?.message || e})`
+  );
+}
+
 let jsPDFPromise;
 function loadJsPDF() {
-  jsPDFPromise ??= import(/* @vite-ignore */ JSPDF_URL).then(m => m.jsPDF || m.default?.jsPDF || m.default);
+  jsPDFPromise ??= import(/* @vite-ignore */ JSPDF_URL)
+    .then(m => m.jsPDF || m.default?.jsPDF || m.default)
+    .catch(e => { jsPDFPromise = undefined; throw cdnError('jsPDF', e); });
   return jsPDFPromise;
 }
 
@@ -24,7 +36,7 @@ function loadPdfJs() {
     // pdf.js needs a worker URL.
     if (mod.GlobalWorkerOptions) mod.GlobalWorkerOptions.workerSrc = PDFJS_WRKR;
     return mod;
-  });
+  }).catch(e => { pdfjsPromise = undefined; throw cdnError('pdf.js', e); });
   return pdfjsPromise;
 }
 
@@ -78,8 +90,16 @@ registerConverter({
   from: ['pdf'],
   to: ['png', 'jpg', 'jpeg', 'webp'],
   heavy: false,
-  notes: 'Renders every page at 2× scale via pdf.js. Multi-page PDFs produce one image per page with -p1/-p2/… suffixes.',
-  async convert(file, targetExt, { onProgress } = {}) {
+  notes: 'Renders every page via pdf.js. Multi-page PDFs produce one image per page with -p1/-p2/… suffixes.',
+  options: [
+    { id: 'scale', label: 'Render scale', type: 'range',
+      min: 1, max: 4, step: 0.5, default: 2, format: v => `${v}×` },
+    { id: 'quality', label: 'Quality (JPEG/WebP)', type: 'range',
+      min: 0.3, max: 1, step: 0.01, default: 0.95, format: v => `${Math.round(v * 100)}%` },
+  ],
+  async convert(file, targetExt, { onProgress, options } = {}) {
+    const scale = Math.min(8, Math.max(0.5, Number(options?.scale) || 2));
+    const quality = Math.min(1, Math.max(0.05, Number(options?.quality) || 0.95));
     onProgress?.(0.02, 'Loading PDF engine…');
     const pdfjs = await loadPdfJs();
 
@@ -98,7 +118,7 @@ registerConverter({
 
     for (let i = 1; i <= pageCount; i++) {
       const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 2 });
+      const viewport = page.getViewport({ scale });
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.ceil(viewport.width);
@@ -113,7 +133,7 @@ registerConverter({
       await page.render({ canvasContext: ctx, viewport }).promise;
 
       const blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime, 0.95);
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime, quality);
       });
 
       // Single-page PDF → plain name (no suffix). Multi-page → zero-padded

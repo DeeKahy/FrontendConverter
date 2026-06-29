@@ -11,15 +11,16 @@ import { registerConverter } from '../registry.js';
 
 // ---------- helpers ----------
 
-async function loadSvgDocument(file) {
-  const text = await file.text();
+// Parse SVG text into a document. Accepts the already-read text so callers
+// that need both the text and the parsed tree don't read the file twice.
+function parseSvg(text) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(text, 'image/svg+xml');
   const err = doc.querySelector('parsererror');
   if (err) throw new Error('Invalid SVG file');
   const svg = doc.documentElement;
   if (svg.tagName.toLowerCase() !== 'svg') throw new Error('Root element is not <svg>');
-  return { text, svg };
+  return svg;
 }
 
 function getSvgSize(svg) {
@@ -36,9 +37,9 @@ function getSvgSize(svg) {
   return { width: Math.round(w), height: Math.round(h) };
 }
 
-async function rasterizeSvg(file, targetExt, { scale = 1 } = {}) {
+async function rasterizeSvg(file, targetExt, { scale = 1, quality = 0.95 } = {}) {
   const text = await file.text();
-  const { svg } = await loadSvgDocument(file);
+  const svg = parseSvg(text);
   const { width, height } = getSvgSize(svg);
 
   const blob = new Blob([text], { type: 'image/svg+xml;charset=utf-8' });
@@ -65,7 +66,7 @@ async function rasterizeSvg(file, targetExt, { scale = 1 } = {}) {
                : targetExt === 'webp' ? 'image/webp'
                : 'image/jpeg';
     return await new Promise((resolve, reject) => {
-      canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime, 0.95);
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime, quality);
     });
   } finally {
     URL.revokeObjectURL(url);
@@ -79,10 +80,18 @@ registerConverter({
   name: 'SVG → raster',
   from: ['svg'],
   to: ['png', 'jpg', 'jpeg', 'webp'],
-  notes: 'Rendered via <img> + Canvas. Upscale by editing the scale option in src/converters/svg.js.',
-  async convert(file, targetExt, { onProgress } = {}) {
+  notes: 'Rendered via <img> + Canvas. Use the Scale option to control output resolution.',
+  options: [
+    { id: 'scale', label: 'Scale', type: 'range',
+      min: 0.5, max: 8, step: 0.5, default: 2, format: v => `${v}×` },
+    { id: 'quality', label: 'Quality (JPEG/WebP)', type: 'range',
+      min: 0.3, max: 1, step: 0.01, default: 0.95, format: v => `${Math.round(v * 100)}%` },
+  ],
+  async convert(file, targetExt, { onProgress, options } = {}) {
+    const scale = Math.min(16, Math.max(0.1, Number(options?.scale) || 2));
+    const quality = Math.min(1, Math.max(0.05, Number(options?.quality) || 0.95));
     onProgress?.(0.2);
-    const blob = await rasterizeSvg(file, targetExt, { scale: 2 });
+    const blob = await rasterizeSvg(file, targetExt, { scale, quality });
     onProgress?.(1);
     return blob;
   }
@@ -266,7 +275,8 @@ function elementToDxf(el, svgHeight, pts, lines, circles) {
 }
 
 async function svgToDxf(file, { onProgress } = {}) {
-  const { text } = await loadSvgDocument(file);
+  const text = await file.text();
+  parseSvg(text); // validate; throws on malformed SVG before we mount it
 
   // Mount a live SVG off-screen so getCTM/getTotalLength actually work.
   const host = document.createElement('div');

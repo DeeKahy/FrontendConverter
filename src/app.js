@@ -11,6 +11,7 @@ import {
   extOf,
   normExt,
 } from './registry.js';
+import { makeZip } from './zip.js';
 
 // ---------- DOM helpers ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -27,9 +28,25 @@ const tpl           = $('#queue-item-tpl');
 const grid          = $('#support-grid');
 
 // ---------- queue state ----------
-/** @type {Map<string, {file: File, fromExt: string, el: HTMLElement}>} */
+/** @type {Map<string, {file: File, fromExt: string, el: HTMLElement, urls: string[]}>} */
 const queue = new Map();
 let queueIdCounter = 0;
+
+// Revoke any object URLs an item is holding so converted blobs can be GC'd.
+function releaseUrls(entry) {
+  if (!entry?.urls) return;
+  for (const u of entry.urls) URL.revokeObjectURL(u);
+  entry.urls = [];
+}
+
+function dropEntry(id) {
+  const entry = queue.get(id);
+  if (!entry) return;
+  releaseUrls(entry);
+  entry.el.remove();
+  queue.delete(id);
+  if (queue.size === 0) queueEl.hidden = true;
+}
 
 // ---------- wiring ----------
 dropzone.addEventListener('click', (e) => {
@@ -48,9 +65,45 @@ browseBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.clic
   dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove('drag-over'); })
 );
 dropzone.addEventListener('drop', (e) => {
-  const files = [...(e.dataTransfer?.files || [])];
+  const dt = e.dataTransfer;
+  // Detect folders: a dropped directory shows up as an item whose
+  // webkitGetAsEntry() is a directory but contributes no File. Browsers
+  // don't expand folders for us here, so flag it instead of silently
+  // dropping everything.
+  const items = dt?.items ? [...dt.items] : [];
+  const hasDir = items.some(it => {
+    const entry = it.webkitGetAsEntry?.();
+    return entry && entry.isDirectory;
+  });
+
+  const files = [...(dt?.files || [])].filter(f => {
+    // Folders sometimes appear as zero-byte, type-less File entries.
+    if (hasDir && f.size === 0 && f.type === '') return false;
+    return true;
+  });
+
   if (files.length) addFiles(files);
+  if (hasDir) {
+    flashDropNote('Folders aren’t supported — drop individual files instead.');
+  } else if (!files.length) {
+    flashDropNote('No files found in that drop.');
+  }
 });
+
+// Briefly show a hint inside the dropzone.
+let dropNoteTimer;
+function flashDropNote(msg) {
+  let note = $('.drop-note', dropzone);
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'drop-note small';
+    $('.drop-inner', dropzone)?.appendChild(note);
+  }
+  note.textContent = msg;
+  note.hidden = false;
+  clearTimeout(dropNoteTimer);
+  dropNoteTimer = setTimeout(() => { note.hidden = true; }, 4000);
+}
 fileInput.addEventListener('change', () => {
   if (fileInput.files?.length) addFiles([...fileInput.files]);
   fileInput.value = '';
@@ -65,7 +118,7 @@ convertAllBtn.addEventListener('click', async () => {
   }
 });
 clearAllBtn.addEventListener('click', () => {
-  for (const { el } of queue.values()) el.remove();
+  for (const entry of queue.values()) { releaseUrls(entry); entry.el.remove(); }
   queue.clear();
   queueEl.hidden = true;
 });
@@ -87,6 +140,7 @@ function addOne(file) {
     `${humanSize(file.size)} · .${fromExt || '?'} · ${file.type || 'unknown type'}`;
 
   const select = $('.qtarget', node);
+  const optionsEl = $('.qoptions', node);
   const targets = targetsFor(fromExt);
   if (!targets.length) {
     select.disabled = true;
@@ -102,17 +156,19 @@ function addOne(file) {
       opt.textContent = conv?.heavy ? `.${t}  (FFmpeg)` : `.${t}`;
       select.appendChild(opt);
     }
+    // Options depend on the chosen converter, so (re)render them whenever the
+    // target format changes — and once now for the default selection.
+    const syncOptions = () =>
+      renderOptions(optionsEl, findConverter(fromExt, normExt(select.value)));
+    select.addEventListener('change', syncOptions);
+    syncOptions();
   }
 
   $('.qconvert', node).addEventListener('click', () => runOne(id));
-  $('.qremove', node).addEventListener('click', () => {
-    node.remove();
-    queue.delete(id);
-    if (queue.size === 0) queueEl.hidden = true;
-  });
+  $('.qremove', node).addEventListener('click', () => dropEntry(id));
 
   queueList.appendChild(node);
-  queue.set(id, { file, fromExt, el: node });
+  queue.set(id, { file, fromExt, el: node, urls: [] });
 }
 
 // ---------- running a conversion ----------
@@ -122,6 +178,7 @@ async function runOne(id) {
   const { file, fromExt, el } = entry;
 
   const select  = $('.qtarget', el);
+  const optionsEl = $('.qoptions', el);
   const btn     = $('.qconvert', el);
   const status  = $('.qstatus', el);
   const result  = $('.qresult', el);
@@ -136,6 +193,9 @@ async function runOne(id) {
     return;
   }
 
+  // Re-converting: free the previous run's download URLs first.
+  releaseUrls(entry);
+
   btn.disabled = true; select.disabled = true;
   result.hidden = true; result.innerHTML = '';
   status.className = 'qstatus working';
@@ -143,7 +203,8 @@ async function runOne(id) {
 
   try {
     const raw = await conv.convert(file, toExt, {
-      onProgress(p, msg) { renderProgress(status, p, msg); }
+      onProgress(p, msg) { renderProgress(status, p, msg); },
+      options: readOptions(optionsEl),
     });
 
     // Normalize: converter may return a single Blob or [{blob,name}, ...].
@@ -160,29 +221,40 @@ async function runOne(id) {
 
     result.hidden = false;
 
-    // One link per output.
-    const links = [];
+    // One link per output. Track the URLs so they can be revoked later.
     for (const { blob, name } of outputs) {
       const url = URL.createObjectURL(blob);
+      entry.urls.push(url);
       const a = document.createElement('a');
       a.href = url;
       a.download = name;
       a.textContent = `Download ${name}`;
       result.appendChild(a);
-      links.push(a);
     }
 
-    // "Download all" for multi-output conversions — clicks each link with a
-    // small delay so browsers actually save them all instead of collapsing
-    // the requests.
+    // "Download all" for multi-output conversions: bundle into a single ZIP
+    // so the browser saves one file instead of firing N downloads (which
+    // triggers the "allow multiple downloads?" prompt and often drops files).
     if (outputs.length > 1) {
+      const zipName = `${swapExt(file.name, '').replace(/\.$/, '')}.zip`;
       const allBtn = document.createElement('button');
       allBtn.className = 'primary small';
-      allBtn.textContent = `Download all (${outputs.length})`;
+      allBtn.textContent = `Download all (${outputs.length}) as .zip`;
       allBtn.addEventListener('click', async () => {
-        for (const a of links) {
+        allBtn.disabled = true;
+        const prev = allBtn.textContent;
+        allBtn.textContent = 'Zipping…';
+        try {
+          const zip = await makeZip(outputs);
+          const url = URL.createObjectURL(zip);
+          entry.urls.push(url);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = zipName;
           a.click();
-          await new Promise(r => setTimeout(r, 120));
+        } finally {
+          allBtn.disabled = false;
+          allBtn.textContent = prev;
         }
       });
       result.prepend(allBtn);
@@ -208,6 +280,70 @@ function renderProgress(container, p, msg) {
   fill.style.width = `${Math.min(100, Math.max(0, (p || 0) * 100))}%`;
   bar.appendChild(fill);
   container.appendChild(bar);
+}
+
+// ---------- per-converter options ----------
+// A converter may declare an `options` array; we render a small control for
+// each one under the queue item. Shapes:
+//   { id, label, type: 'range', min, max, step, default, format? }
+//   { id, label, type: 'select', default, choices: [{value, label}] }
+function renderOptions(container, conv) {
+  container.innerHTML = '';
+  const opts = conv?.options;
+  if (!opts?.length) { container.hidden = true; return; }
+  container.hidden = false;
+
+  for (const opt of opts) {
+    const wrap = document.createElement('label');
+    wrap.className = 'qopt';
+
+    const name = document.createElement('span');
+    name.className = 'qopt-label';
+    name.textContent = opt.label;
+    wrap.appendChild(name);
+
+    let input;
+    if (opt.type === 'select') {
+      input = document.createElement('select');
+      for (const c of opt.choices) {
+        const o = document.createElement('option');
+        o.value = c.value;
+        o.textContent = c.label;
+        if (String(c.value) === String(opt.default)) o.selected = true;
+        input.appendChild(o);
+      }
+    } else {
+      input = document.createElement('input');
+      input.type = opt.type === 'range' ? 'range' : 'number';
+      if (opt.min != null)  input.min = opt.min;
+      if (opt.max != null)  input.max = opt.max;
+      if (opt.step != null) input.step = opt.step;
+      input.value = opt.default;
+    }
+    input.dataset.optId = opt.id;
+    input.dataset.optKind = opt.type === 'select' ? 'select' : 'number';
+    wrap.appendChild(input);
+
+    if (opt.type === 'range') {
+      const val = document.createElement('span');
+      val.className = 'qopt-val';
+      const fmt = opt.format || (v => v);
+      val.textContent = fmt(opt.default);
+      input.addEventListener('input', () => { val.textContent = fmt(input.value); });
+      wrap.appendChild(val);
+    }
+
+    container.appendChild(wrap);
+  }
+}
+
+function readOptions(container) {
+  const out = {};
+  for (const input of $$('[data-opt-id]', container)) {
+    const v = input.value;
+    out[input.dataset.optId] = input.dataset.optKind === 'number' ? parseFloat(v) : v;
+  }
+  return out;
 }
 
 function swapExt(filename, newExt) {

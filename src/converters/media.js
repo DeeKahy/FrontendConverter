@@ -111,9 +111,14 @@ registerConverter({
   to:   ['mp3', 'wav', 'ogg'],
   heavy: true,
   notes: 'Uses FFmpeg.wasm. First run downloads ~30 MB; subsequent runs are instant.',
-  async convert(file, targetExt, opts) {
+  options: [
+    { id: 'bitrate', label: 'MP3 bitrate', type: 'select', default: '192k',
+      choices: ['128k', '192k', '256k', '320k'].map(v => ({ value: v, label: v })) },
+  ],
+  async convert(file, targetExt, opts = {}) {
+    const bitrate = /^\d+k$/.test(opts.options?.bitrate || '') ? opts.options.bitrate : '192k';
     const argMap = {
-      mp3: ['-codec:a', 'libmp3lame', '-b:a', '192k'],
+      mp3: ['-codec:a', 'libmp3lame', '-b:a', bitrate],
       ogg: ['-codec:a', 'libvorbis', '-q:a', '5'],
       wav: ['-codec:a', 'pcm_s16le'],
     };
@@ -129,19 +134,37 @@ registerConverter({
   from: ['mp4', 'mov', 'webm', 'mkv', 'avi'],
   to:   ['mp4', 'webm', 'gif', 'mp3'],
   heavy: true,
-  notes: 'Uses FFmpeg.wasm. MP4→MP3 extracts audio. MP4→GIF produces a 480px, 12fps clip.',
-  async convert(file, targetExt, opts) {
+  notes: 'Uses FFmpeg.wasm. MP4→MP3 extracts audio. MP4→GIF produces a scaled, reduced-fps clip.',
+  options: [
+    { id: 'crf', label: 'MP4 quality (CRF — lower = better)', type: 'range',
+      min: 18, max: 32, step: 1, default: 23, format: v => `${v}` },
+    { id: 'gifFps', label: 'GIF fps', type: 'range',
+      min: 5, max: 30, step: 1, default: 12, format: v => `${v} fps` },
+    { id: 'gifWidth', label: 'GIF width', type: 'select', default: '480',
+      choices: ['320', '480', '640', '720'].map(v => ({ value: v, label: `${v}px` })) },
+  ],
+  async convert(file, targetExt, opts = {}) {
+    const o = opts.options || {};
     if (targetExt === 'mp3') {
       return runFFmpeg(file, 'mp3', ['-vn', '-codec:a', 'libmp3lame', '-b:a', '192k'], opts);
     }
     if (targetExt === 'gif') {
+      const fps = clampInt(o.gifFps, 5, 30, 12);
+      const width = clampInt(o.gifWidth, 80, 1920, 480);
       // Palette-free single-pass GIF — good enough for short clips.
-      return runFFmpeg(file, 'gif', ['-vf', 'fps=12,scale=480:-1:flags=lanczos', '-loop', '0'], opts);
+      return runFFmpeg(file, 'gif', ['-vf', `fps=${fps},scale=${width}:-1:flags=lanczos`, '-loop', '0'], opts);
     }
     if (targetExt === 'webm') {
       return runFFmpeg(file, 'webm', ['-c:v', 'libvpx', '-b:v', '1M', '-c:a', 'libvorbis'], opts);
     }
     // mp4
-    return runFFmpeg(file, 'mp4', ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-c:a', 'aac'], opts);
+    const crf = clampInt(o.crf, 0, 51, 23);
+    return runFFmpeg(file, 'mp4', ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', String(crf), '-c:a', 'aac'], opts);
   }
 });
+
+function clampInt(v, lo, hi, dflt) {
+  const n = Math.round(Number(v));
+  if (!isFinite(n)) return dflt;
+  return Math.min(hi, Math.max(lo, n));
+}

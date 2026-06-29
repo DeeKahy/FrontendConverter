@@ -62,12 +62,20 @@ top of the file).
 | Canvas raster | png/jpg/webp/bmp/gif → png/jpg/webp | built-in Canvas API |
 | SVG → raster | svg → png/jpg/webp | built-in |
 | **SVG → DXF (CAD)** | svg → dxf | pure JS |
-| CSV ↔ JSON | csv ↔ json | pure JS |
+| CSV / TSV ↔ JSON | csv/tsv ↔ json | pure JS |
+| CSV ↔ TSV | csv ↔ tsv | pure JS |
+| Tabular → Markdown table | csv/tsv/json → md | pure JS |
 | Text ↔ Markdown | txt ↔ md | pure JS |
+| Text ↔ Base64 | txt/md/json/csv/tsv → b64, b64 → txt | pure JS |
 | Image → PDF | png/jpg/webp → pdf | [jsPDF](https://github.com/parallax/jsPDF) (CDN, lazy) |
 | PDF → image (all pages) | pdf → png/jpg/webp | [pdf.js](https://mozilla.github.io/pdf.js/) (CDN, lazy) |
-| Audio transcode | mp3/wav/ogg/m4a/flac/aac → mp3/wav/ogg | [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) (CDN, **lazy — ~30 MB**) |
-| Video transcode / extract | mp4/mov/webm/mkv/avi → mp4/webm/gif/mp3 | ffmpeg.wasm (CDN, lazy) |
+| Audio transcode | mp3/wav/ogg/m4a/flac/aac → mp3/wav/ogg | [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) (vendored, **lazy — ~30 MB**) |
+| Video transcode / extract | mp4/mov/webm/mkv/avi → mp4/webm/gif/mp3 | ffmpeg.wasm (vendored, lazy) |
+
+Many converters expose per-conversion **options** (image quality, render scale,
+MP3 bitrate, GIF fps/width, MP4 CRF) that appear as controls under each queued
+file once a target format is chosen. Converters declare them with an `options`
+array — see "Adding a new format" below.
 
 ## On "SVG → DWG" specifically
 
@@ -144,8 +152,35 @@ async convert(file, targetExt) {
 }
 ```
 
-The UI renders one download link per output and adds a "Download all"
-button automatically. Single-page cases should still return a plain `Blob`.
+The UI renders one download link per output and adds a **"Download all as
+.zip"** button (bundled with a tiny built-in store-only ZIP writer in
+`src/zip.js` — no dependency, no extra downloads firing). Single-page cases
+should still return a plain `Blob`.
+
+### Declaring options
+
+Add an `options` array to a converter and the UI renders a control per option
+under the queued file; the chosen values arrive in `opts.options`:
+
+```js
+registerConverter({
+  id: 'xyz-to-abc',
+  /* … */
+  options: [
+    { id: 'quality', label: 'Quality', type: 'range', min: 0.3, max: 1, step: 0.01,
+      default: 0.92, format: v => `${Math.round(v * 100)}%` },
+    { id: 'mode', label: 'Mode', type: 'select', default: 'fast',
+      choices: [{ value: 'fast', label: 'Fast' }, { value: 'best', label: 'Best' }] },
+  ],
+  async convert(file, targetExt, { onProgress, options } = {}) {
+    const quality = options?.quality ?? 0.92;   // always default — options may be absent
+    /* … */
+  }
+});
+```
+
+`type` is `'range'`, `'number'`, or `'select'`. Always fall back to a default
+when reading an option so the converter still works if called without one.
 
 ### Lazy-loading a heavy dependency
 

@@ -127,10 +127,33 @@ select {
 .qinfo { min-width: 0; }
 .qname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qcontrols { display: flex; gap: 8px; align-items: center; }
+.qoptions[hidden] { display: none; }
+.qoptions {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; gap: 14px 20px;
+  padding: 10px 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.qopt { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg-dim); }
+.qopt-label { white-space: nowrap; }
+.qopt input[type="range"] { width: 120px; accent-color: var(--accent); }
+.qopt input[type="number"] { width: 70px; }
+.qopt input[type="number"], .qopt select {
+  font: inherit; color: var(--fg);
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px 8px; min-width: 0;
+}
+.qopt-val { font-family: var(--mono); color: var(--fg); min-width: 38px; }
+
+.drop-note { color: var(--accent); margin-top: 6px !important; }
+
 .qstatus { grid-column: 1 / -1; min-height: 0; }
 .qstatus.working { color: var(--fg-dim); }
 .qstatus.error { color: var(--danger); }
 .qstatus.ok { color: var(--ok); }
+.qresult[hidden] { display: none; }
 .qresult { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
 .qresult a {
   background: var(--bg-elev-2);
