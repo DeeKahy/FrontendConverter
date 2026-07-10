@@ -69,6 +69,7 @@ top of the file).
 | Text ↔ Base64 | txt/md/json/csv/tsv → b64, b64 → txt | pure JS |
 | Image → PDF | png/jpg/webp → pdf | [jsPDF](https://github.com/parallax/jsPDF) (CDN, lazy) |
 | PDF → image (all pages) | pdf → png/jpg/webp | [pdf.js](https://mozilla.github.io/pdf.js/) (CDN, lazy) |
+| **Markdown → PDF** | md/markdown → pdf | [marked](https://marked.js.org/) + [html2pdf.js](https://github.com/eKoopmans/html2pdf.js) (CDN, lazy) |
 | Audio transcode | mp3/wav/ogg/m4a/flac/aac → mp3/wav/ogg | [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) (vendored, **lazy — ~30 MB**) |
 | Video transcode / extract | mp4/mov/webm/mkv/avi → mp4/webm/gif/mp3 | ffmpeg.wasm (vendored, lazy) |
 
@@ -222,6 +223,7 @@ src/
     svg.js           — SVG → raster, SVG → DXF
     text.js          — JSON ↔ CSV, TXT ↔ MD
     pdf.js           — image ↔ PDF (jsPDF + pdf.js, lazy)
+    markdown.js      — Markdown → PDF (marked + html2pdf.js, lazy)
     media.js         — audio/video via FFmpeg.wasm (lazy)
 ```
 

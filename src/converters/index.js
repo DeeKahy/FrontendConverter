@@ -7,4 +7,5 @@ import './image.js';
 import './svg.js';
 import './text.js';
 import './pdf.js';
+import './markdown.js';
 import './media.js';
