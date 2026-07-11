@@ -8,14 +8,20 @@
 
 import { registerConverter } from '../registry.js';
 
-// esm.sh bundles npm packages as browser-ready ES modules. Pinning versions
-// keeps the app reproducible.
-const MARKED_URL   = 'https://esm.sh/marked@12.0.2';
-const HTML2PDF_URL = 'https://esm.sh/html2pdf.js@0.10.2';
+// marked loads as a plain ES module from esm.sh (pure JS, no interop traps).
+const MARKED_URL = 'https://esm.sh/marked@12.0.2';
+
+// html2pdf.js is loaded as its self-contained UMD *bundle* (html2canvas + jsPDF
+// baked in), injected as a classic <script>. We deliberately DON'T import the
+// esm.sh ES build: that build resolves its internal `html2canvas` dependency to
+// a module namespace object instead of the function, so html2pdf throws
+// "x is not a function (x(this.prop.container,…))" at render time. The UMD
+// bundle sidesteps that entirely by resolving its own deps internally.
+const HTML2PDF_URL = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js';
 
 // These load from a CDN on first use. If the network is down or the CDN is
-// blocked, the dynamic import() rejects with an opaque message — wrap it in
-// something actionable (mirrors pdf.js / media.js).
+// blocked, loading rejects with an opaque message — wrap it in something
+// actionable (mirrors pdf.js / media.js).
 function cdnError(lib, e) {
   return new Error(
     `Couldn't load ${lib} from the CDN — check your connection, or self-host ` +
@@ -33,9 +39,17 @@ function loadMarked() {
 
 let html2pdfPromise;
 function loadHtml2Pdf() {
-  html2pdfPromise ??= import(/* @vite-ignore */ HTML2PDF_URL)
-    .then(m => m.default || m.html2pdf || m)
-    .catch(e => { html2pdfPromise = undefined; throw cdnError('html2pdf.js', e); });
+  if (globalThis.html2pdf) return Promise.resolve(globalThis.html2pdf);
+  html2pdfPromise ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = HTML2PDF_URL;
+    s.onload = () => globalThis.html2pdf
+      ? resolve(globalThis.html2pdf)
+      : reject(cdnError('html2pdf.js', new Error('loaded but no global html2pdf')));
+    s.onerror = () => { html2pdfPromise = undefined; s.remove();
+      reject(cdnError('html2pdf.js', new Error('script failed to load'))); };
+    document.head.appendChild(s);
+  });
   return html2pdfPromise;
 }
 
