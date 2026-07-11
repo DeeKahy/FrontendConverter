@@ -118,25 +118,31 @@ registerConverter({
     const md = await file.text();
     const bodyHtml = marked.parse(md, { gfm: true, breaks: false });
 
-    // Render into an off-screen, but laid-out, container. html2canvas (used by
-    // html2pdf) needs the element actually in the DOM to measure/paint it, so
-    // we can't use a detached node — park it off-screen and clean up after.
+    // html2canvas (used by html2pdf) needs the element actually laid out in the
+    // DOM, so we park it off-screen and clean up after. IMPORTANT: the off-screen
+    // positioning goes on a WRAPPER, not on the element we hand to html2pdf.
+    // html2pdf clones that element into its own render container; a cloned
+    // `position:fixed; left:-10000px` escapes that container and rasterizes to a
+    // blank page. The inner host stays statically positioned so it renders.
     const format = options?.format === 'letter' ? 'letter' : 'a4';
     const margin = Math.min(30, Math.max(0, Number(options?.margin ?? 12)));
 
     const style = document.createElement('style');
     style.textContent = PRINT_CSS;
 
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;';
+
     const host = document.createElement('div');
     host.className = 'md-root';
     // Fixed content width gives consistent line wrapping regardless of the
     // user's window size; html2pdf scales this to fit the page's content box.
-    host.style.cssText =
-      'position:fixed;left:-10000px;top:0;width:720px;padding:0;z-index:-1;';
+    host.style.width = '720px';
     host.innerHTML = bodyHtml;
+    wrapper.appendChild(host);
 
     document.body.appendChild(style);
-    document.body.appendChild(host);
+    document.body.appendChild(wrapper);
 
     try {
       onProgress?.(0.6, 'Laying out pages…');
@@ -151,7 +157,7 @@ registerConverter({
       onProgress?.(1);
       return blob;
     } finally {
-      host.remove();
+      wrapper.remove();
       style.remove();
     }
   }
